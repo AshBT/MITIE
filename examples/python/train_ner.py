@@ -31,7 +31,9 @@ from mitie import *
 sample = ner_training_instance(["My", "name", "is", "Davis", "King", "and", "I", "work", "for", "MIT", "."])
 # Now that we have the tokens stored, we add the entity annotations.  The first
 # annotation indicates that the tokens in the range(3,5) is a person.  I.e.
-# "Davis King" is a person name.
+# "Davis King" is a person name.  Note that you can use any strings as the
+# labels.  Here we use "person" and "org" but you could use any labels you
+# like. 
 sample.add_entity(xrange(3,5), "person")
 sample.add_entity(xrange(9,10), "org")
 
@@ -76,7 +78,7 @@ ner.save_to_disk("new_ner_model.dat")
 # But now let's try out the ner object.  It was only trained on a small dataset but it
 # has still learned a little.  So let's give it a whirl.  But first, print a list of
 # possible tags.  In this case, it is just "person" and "org".
-print "tags:", ner.get_possible_ner_tags()
+print ("tags:", ner.get_possible_ner_tags())
 
 
 # Now let's make up a test sentence and ask the ner object to find the entities.
@@ -84,14 +86,10 @@ tokens = ["I", "met", "with", "John", "Becker", "at", "HBU", "."]
 entities = ner.extract_entities(tokens)
 # Happily, it found the correct answers, "John Becker" and "HBU" in this case which we
 # print out below.
-print "\nEntities found:", entities
-print "\nNumber of entities detected:", len(entities)
+print ("\nEntities found:", entities)
+print ("\nNumber of entities detected:", len(entities))
 for e in entities:
     range = e[0]
     tag = e[1]
     entity_text = " ".join(tokens[i] for i in range)
-    print "    " + tag + ": " + entity_text
-
-
-
-
+    print ("    " + tag + ": " + entity_text)

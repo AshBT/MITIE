@@ -1,6 +1,6 @@
 // Copyright (C) 2014 Massachusetts Institute of Technology, Lincoln Laboratory
 // License: Boost Software License   See LICENSE.txt for the full license.
-// Authors: Davis E. King (davis.king@ll.mit.edu)
+// Authors: Davis E. King (davis@dlib.net)
 #include <mitie.h>
 
 #include <cstring>
@@ -16,6 +16,9 @@
 #include <mitie/binary_relation_detector.h>
 #include <mitie/ner_trainer.h>
 #include <mitie/binary_relation_detector_trainer.h>
+#include <mitie/text_categorizer.h>
+#include <mitie/text_categorizer_trainer.h>
+#include <mitie/total_word_feature_extractor.h>
 
 using namespace mitie;
 
@@ -40,7 +43,10 @@ namespace
         MITIE_BINARY_RELATION,
         MITIE_BINARY_RELATION_TRAINER,
         MITIE_NER_TRAINING_INSTANCE,
-        MITIE_NER_TRAINER
+        MITIE_NER_TRAINER,
+        MITIE_TEXT_CATEGORIZER,
+        MITIE_TEXT_CATEGORIZER_TRAINER,
+        MITIE_TOTAL_WORD_FEATURE_EXTRACTOR       
     };
 
     template <typename T>
@@ -54,6 +60,10 @@ namespace
     template <> struct allocatable_types<binary_relation>               { const static mitie_object_type type = MITIE_BINARY_RELATION; };
     template <> struct allocatable_types<ner_training_instance>         { const static mitie_object_type type = MITIE_NER_TRAINING_INSTANCE; };
     template <> struct allocatable_types<ner_trainer>                   { const static mitie_object_type type = MITIE_NER_TRAINER; };
+    template <> struct allocatable_types<text_categorizer>              { const static mitie_object_type type = MITIE_TEXT_CATEGORIZER; };
+    template <> struct allocatable_types<text_categorizer_trainer>      { const static mitie_object_type type = MITIE_TEXT_CATEGORIZER_TRAINER; };
+    template <> struct allocatable_types<total_word_feature_extractor>      { const static mitie_object_type type = MITIE_TOTAL_WORD_FEATURE_EXTRACTOR; };
+
 
 // ----------------------------------------------------------------------------------------
 
@@ -154,6 +164,55 @@ namespace
         try
         {
             return new((char*)temp+min_alignment) T(arg1,arg2);
+        }
+        catch (...)
+        {
+            free(temp);
+            throw std::bad_alloc();
+        }
+    }
+
+    template <typename T, typename A1, typename A2, typename A3>
+    T* allocate(const A1& arg1, const A2& arg2, const A3& arg3)
+    /*!
+        This function is just like allocate() except it passes arg1, arg2, & arg3 to T's constructor.
+    !*/
+    {
+        const mitie_object_type type = allocatable_types<T>::type;
+        void* temp = malloc(sizeof(T)+min_alignment);
+        if (temp == 0)
+            throw std::bad_alloc();
+
+        *((int*)temp) = type;
+
+        try
+        {
+            return new((char*)temp+min_alignment) T(arg1,arg2,arg3);
+        }
+        catch (...)
+        {
+            free(temp);
+            throw std::bad_alloc();
+        }
+    }
+
+
+    template <typename T, typename A1, typename A2, typename A3, typename A4>
+    T* allocate(const A1& arg1, const A2& arg2, const A3& arg3, const A4& arg4)
+    /*!
+        This function is just like allocate() except it passes arg1, arg2, arg3, and arg4 to T's constructor.
+    !*/
+    {
+        const mitie_object_type type = allocatable_types<T>::type;
+        void* temp = malloc(sizeof(T)+min_alignment);
+        if (temp == 0)
+            throw std::bad_alloc();
+
+        *((int*)temp) = type;
+
+        try
+        {
+            return new((char*)temp+min_alignment) T(arg1,arg2,arg3,arg4);
         }
         catch (...)
         {
@@ -322,6 +381,7 @@ extern "C"
     {
         std::vector<std::pair<unsigned long, unsigned long> > ranges;
         std::vector<unsigned long> predicted_labels;
+        std::vector<double> predicted_scores;
         std::vector<std::string> tags;
     };
 
@@ -359,6 +419,15 @@ extern "C"
             case MITIE_NER_TRAINER:
                 destroy<ner_trainer>(object);
                 break;
+            case MITIE_TEXT_CATEGORIZER_TRAINER:
+                destroy<text_categorizer_trainer>(object);
+                break;
+            case MITIE_TEXT_CATEGORIZER:
+                destroy<text_categorizer>(object);
+                break;                
+            case MITIE_TOTAL_WORD_FEATURE_EXTRACTOR:
+                destroy<total_word_feature_extractor>(object);
+                break; 
             default:
                 std::cerr << "ERROR, mitie_free() called on non-MITIE object or called twice." << std::endl;
                 assert(false);
@@ -386,6 +455,55 @@ extern "C"
                 throw dlib::error("This file does not contain a mitie::named_entity_extractor. Contained: " + classname);
             dlib::deserialize(filename) >> classname >> *impl;
             return (mitie_named_entity_extractor*)impl;
+        }
+        catch(std::exception& e)
+        {
+#ifndef NDEBUG
+            cerr << "Error loading MITIE model file: " << filename << "\n" << e.what() << endl;
+#endif
+            mitie_free(impl);
+            return NULL;
+        }
+        catch(...)
+        {
+            mitie_free(impl);
+            return NULL;
+        }
+    }
+
+
+    mitie_named_entity_extractor* mitie_load_named_entity_extractor_pure_model (
+        const char* filename,
+        const char* fe_filename
+    )
+    {
+        assert(filename != NULL);
+        assert(fe_filename != NULL);
+
+        named_entity_extractor* impl = 0;
+        try
+        {
+            string classname;
+            dlib::sequence_segmenter<ner_feature_extractor> segmenter;
+            std::vector<std::string> tag_name_strings;
+            dlib::multiclass_linear_decision_function<dlib::sparse_linear_kernel<ner_sample_type>,unsigned long> df;
+            total_word_feature_extractor fe;
+
+
+            dlib::deserialize(filename) >> classname;
+            if (classname != "mitie::named_entity_extractor_pure_model")
+                throw dlib::error("This file does not contain a mitie::named_entity_extractor_pure_model. Contained: " + classname);
+            dlib::deserialize(filename) >> classname >> df >> segmenter >> tag_name_strings;
+
+            dlib::deserialize(fe_filename) >> classname;
+            if (classname != "mitie::total_word_feature_extractor")
+                throw dlib::error("This file does not contain a mitie::total_word_feature_extractor. Contained: " + classname);
+            dlib::deserialize(fe_filename) >> classname >> fe;
+
+            impl = allocate<named_entity_extractor>(tag_name_strings, fe, segmenter, df);
+
+            return (mitie_named_entity_extractor*)impl;
+
         }
         catch(std::exception& e)
         {
@@ -439,7 +557,7 @@ extern "C"
             for (unsigned long i = 0; tokens[i]; ++i)
                 words.push_back(tokens[i]);
 
-            ner(words, impl->ranges, impl->predicted_labels);
+            ner.predict(words, impl->ranges, impl->predicted_labels, impl->predicted_scores);
             impl->tags = ner.get_tag_name_strings();
             return impl;
         }
@@ -487,6 +605,16 @@ extern "C"
         assert(dets);
         assert(idx < mitie_ner_get_num_detections(dets));
         return dets->predicted_labels[idx];
+    }
+
+    double mitie_ner_get_detection_score (
+        const mitie_named_entity_detections* dets,
+        unsigned long idx
+    )
+    {
+        assert(dets);
+        assert(idx < mitie_ner_get_num_detections(dets));
+        return dets->predicted_scores[idx];
     }
 
     const char* mitie_ner_get_detection_tagstr (
@@ -652,7 +780,124 @@ extern "C"
             return 1;
         }
     }
+    
+    mitie_text_categorizer* mitie_load_text_categorizer (
+         const char* filename
+     )
+     {
+         assert(filename != NULL);
 
+         text_categorizer* impl = 0;
+         try
+         {
+             string classname;
+             impl = allocate<text_categorizer>();
+             dlib::deserialize(filename) >> classname;
+             if (classname != "mitie::text_categorizer")
+                 throw dlib::error("This file does not contain a mitie::text_categorizer. Contained: " + classname);
+             dlib::deserialize(filename) >> classname >> *impl;
+             return (mitie_text_categorizer*)impl;
+         }
+         catch(std::exception& e)
+         {
+ #ifndef NDEBUG
+             cerr << "Error loading MITIE model file: " << filename << "\n" << e.what() << endl;
+ #endif
+             mitie_free(impl);
+             return NULL;
+         }
+         catch(...)
+         {
+             mitie_free(impl);
+             return NULL;
+         }
+     }
+
+    
+    mitie_text_categorizer* mitie_load_text_categorizer_pure_model (
+         const char* filename,
+         const char* fe_filename
+     )
+     {
+         assert(filename != NULL);
+         assert(fe_filename != NULL);
+
+         text_categorizer* impl = 0;
+         try
+         {
+             string classname;
+             std::vector<std::string> tag_name_strings;
+             dlib::multiclass_linear_decision_function<dlib::sparse_linear_kernel<ner_sample_type>,unsigned long> df;
+             total_word_feature_extractor fe;
+
+             dlib::deserialize(filename) >> classname;
+             if (classname != "mitie::text_categorizer_pure_model")
+                 throw dlib::error("This file does not contain a mitie::text_categorizer_pure_model. Contained: " + classname);
+             dlib::deserialize(filename) >> classname >> df >> tag_name_strings;
+
+             dlib::deserialize(fe_filename) >> classname;
+             if (classname != "mitie::total_word_feature_extractor")
+                 throw dlib::error("This file does not contain a mitie::total_word_feature_extractor. Contained: " + classname);
+             dlib::deserialize(fe_filename) >> classname >> fe;
+
+             impl = allocate<text_categorizer>(tag_name_strings, fe, df);
+
+             return (mitie_text_categorizer*)impl;
+         }
+         catch(std::exception& e)
+         {
+ #ifndef NDEBUG
+             cerr << "Error loading MITIE model file: " << filename << "\n" << e.what() << endl;
+ #endif
+             mitie_free(impl);
+             return NULL;
+         }
+         catch(...)
+         {
+             mitie_free(impl);
+             return NULL;
+         }
+     }
+     
+     int mitie_categorize_text (
+         const mitie_text_categorizer* tcat_,
+         const char** tokens,
+         char** text_tag,
+         double* text_score
+     )
+     {
+         try
+         {       
+             assert(text_tag);
+             assert(text_score);
+
+             string tag;
+             double score;
+             std::vector<std::string> words;
+
+             while(*tokens)
+                 words.push_back(*tokens++);
+              
+             checked_cast<text_categorizer>(tcat_).predict(words,tag,score);
+
+             char * writable = (char*)allocate_bytes(tag.size()+1);
+             std::copy(tag.begin(), tag.end(), writable);
+             writable[tag.size()] = '\0';
+             
+             *text_tag = writable;               
+             *text_score = score;
+                      
+             return 0; 
+         }
+         catch (...)
+         {
+#ifndef NDEBUG
+             cerr << "Error categorizing text: " << endl;
+#endif
+             return 1;
+         }
+     }
+     
 // ----------------------------------------------------------------------------------------
 // ----------------------------------------------------------------------------------------
 //                                      TRAINING ROUTINES
@@ -688,6 +933,39 @@ extern "C"
         }
     }
 
+    int mitie_save_named_entity_extractor_pure_model (
+        const char* filename,
+        const mitie_named_entity_extractor* ner_
+    )
+    {
+        const named_entity_extractor& ner = checked_cast<named_entity_extractor>(ner_);
+        assert(filename);
+
+        try
+        {
+            dlib::serialize(filename) 
+            << "mitie::named_entity_extractor_pure_model"
+            << ner.get_df()
+            << ner.get_segmenter()
+            << ner.get_tag_name_strings();
+            return 0;
+        }
+        catch (std::exception& e)
+        {
+#ifndef NDEBUG
+            cerr << "Error saving MITIE pure model file: " << filename << "\n" << e.what() << endl;
+#endif
+            return 1;
+        }
+        catch (...)
+        {
+#ifndef NDEBUG
+            cerr << "Error saving MITIE model file: " << filename << endl;
+#endif
+            return 1;
+        }
+    }
+
 // ----------------------------------------------------------------------------------------
 
     int mitie_save_binary_relation_detector (
@@ -701,6 +979,67 @@ extern "C"
         try
         {
             dlib::serialize(filename) << "mitie::binary_relation_detector" << detector;
+            return 0;
+        }
+        catch (std::exception& e)
+        {
+#ifndef NDEBUG
+            cerr << "Error saving MITIE model file: " << filename << "\n" << e.what() << endl;
+#endif
+            return 1;
+        }
+        catch (...)
+        {
+#ifndef NDEBUG
+            cerr << "Error saving MITIE model file: " << filename << endl;
+#endif
+            return 1;
+        }
+    }
+
+    int mitie_save_text_categorizer (
+        const char* filename,
+        const mitie_text_categorizer* tcat_
+    )
+    {
+        const text_categorizer& tcat = checked_cast<text_categorizer>(tcat_);
+        assert(filename);
+
+        try
+        {
+            dlib::serialize(filename) << "mitie::text_categorizer" << tcat;
+            return 0;
+        }
+        catch (std::exception& e)
+        {
+#ifndef NDEBUG
+            cerr << "Error saving MITIE model file: " << filename << "\n" << e.what() << endl;
+#endif
+            return 1;
+        }
+        catch (...)
+        {
+#ifndef NDEBUG
+            cerr << "Error saving MITIE model file: " << filename << endl;
+#endif
+            return 1;
+        }
+    }
+
+    int mitie_save_text_categorizer_pure_model (
+        const char* filename,
+        const mitie_text_categorizer* tcat_
+    )
+    {
+        const text_categorizer& tcat = checked_cast<text_categorizer>(tcat_);
+        assert(filename);
+
+        try
+        {
+            dlib::serialize(filename) 
+            << "mitie::text_categorizer_pure_model" 
+            << tcat.get_df()
+            << tcat.get_tag_name_strings();
             return 0;
         }
         catch (std::exception& e)
@@ -1062,8 +1401,221 @@ extern "C"
             return NULL;
         }
     }
+// ----------------------------------------------------------------------------------------
+
+    mitie_text_categorizer_trainer* mitie_create_text_categorizer_trainer (
+        const char* filename
+    )
+    {
+        assert(filename != NULL);
+
+        try
+        {
+            return (mitie_text_categorizer_trainer*)allocate<text_categorizer_trainer>(filename);
+        }
+        catch(...)
+        {
+            return NULL;
+        }
+    }
 
 // ----------------------------------------------------------------------------------------
 
+    int mitie_add_text_categorizer_labeled_text (
+      mitie_text_categorizer_trainer* trainer_,
+      const char** tokens,
+      const char* label
+    )
+    {
+        assert(tokens);
+        assert(label);
+        text_categorizer_trainer& trainer =  checked_cast<text_categorizer_trainer>(trainer_);
+        try
+        {
+          std::vector<std::string> words;
+          while(*tokens)
+              words.push_back(*tokens++);
+          trainer.add(words, label);
+          return 0;
+        }
+        catch(...)
+        {
+            return 1;
+        }
+    }
+    
+// ----------------------------------------------------------------------------------------
+
+    unsigned long mitie_text_categorizer_trainer_size (
+        const mitie_text_categorizer_trainer* trainer_
+    )
+    {
+        return checked_cast<text_categorizer_trainer>(trainer_).size();
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    void mitie_text_categorizer_trainer_set_beta (
+        mitie_text_categorizer_trainer* trainer_,
+        double beta
+    )
+    {
+        assert(beta >= 0);
+        checked_cast<text_categorizer_trainer>(trainer_).set_beta(beta);
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    double mitie_text_categorizer_trainer_get_beta (
+        const mitie_text_categorizer_trainer* trainer_
+    )
+    {
+        return checked_cast<text_categorizer_trainer>(trainer_).get_beta();
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    void mitie_text_categorizer_trainer_set_num_threads (
+        mitie_text_categorizer_trainer* trainer_,
+        unsigned long num_threads
+    )
+    {
+        checked_cast<text_categorizer_trainer>(trainer_).set_num_threads(num_threads);
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    unsigned long mitie_text_categorizer_trainer_get_num_threads (
+        const mitie_text_categorizer_trainer* trainer_
+    )
+    {
+        return checked_cast<text_categorizer_trainer>(trainer_).get_num_threads();
+    }
+
+// ----------------------------------------------------------------------------------------
+
+  mitie_text_categorizer* mitie_train_text_categorizer (
+      const mitie_text_categorizer_trainer* trainer_
+  )
+  {
+      assert(mitie_text_categorizer_trainer_size(trainer_) > 0);
+      const text_categorizer_trainer& trainer =  checked_cast<text_categorizer_trainer>(trainer_);
+      try
+      {
+          return (mitie_text_categorizer*)allocate<text_categorizer>(trainer.train());
+      }
+      catch(...)
+      {
+          return NULL;
+      }
+  }
+
+
 }
 
+// ----------------------------------------------------------------------------------------
+
+    mitie_total_word_feature_extractor* mitie_load_total_word_feature_extractor (
+        const char* filename
+    )
+    {
+        assert(filename != NULL);
+
+        total_word_feature_extractor* impl = 0;
+        try
+        {
+            string classname;
+            impl = allocate<total_word_feature_extractor>();
+            dlib::deserialize(filename) >> classname;
+            if (classname != "mitie::total_word_feature_extractor")
+                throw dlib::error("This file does not contain a mitie::total_word_feature_extractor. Contained: " + classname);
+            dlib::deserialize(filename) >> classname >> *impl;
+            return (mitie_total_word_feature_extractor*)impl;
+        }
+        catch(std::exception& e)
+        {
+#ifndef NDEBUG
+            cerr << "Error loading MITIE model file: " << filename << "\n" << e.what() << endl;
+#endif
+            mitie_free(impl);
+            return NULL;
+        }
+        catch(...)
+        {
+            mitie_free(impl);
+            return NULL;
+        }
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    unsigned long mitie_total_word_feature_extractor_fingerprint (
+        const mitie_total_word_feature_extractor* twfe
+    )
+    {
+        return checked_cast<total_word_feature_extractor>(twfe).get_fingerprint();
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    unsigned long mitie_total_word_feature_extractor_num_dimensions (
+        const mitie_total_word_feature_extractor* twfe
+    )
+    {
+        return checked_cast<total_word_feature_extractor>(twfe).get_num_dimensions();
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    unsigned long mitie_total_word_feature_extractor_num_words_in_dictionary (
+        const mitie_total_word_feature_extractor* twfe
+    )
+    {
+        return checked_cast<total_word_feature_extractor>(twfe).get_num_words_in_dictionary();
+    }
+
+// ----------------------------------------------------------------------------------------
+
+     int mitie_total_word_feature_extractor_get_feature_vector (
+         const mitie_total_word_feature_extractor* twfe,
+         const char* word,
+         float* result
+     )
+     {
+         assert(word);
+         
+         try
+         {       
+             dlib::matrix<float,0,1> feats;
+
+             checked_cast<total_word_feature_extractor>(twfe).get_feature_vector(word, feats);
+             for (long i = 0; i < feats.size(); ++i)
+                 result[i] = feats(i);
+                              
+             return 0; 
+         }
+         catch (...)
+         {
+#ifndef NDEBUG
+             cerr << "Error getting feature vector: " << endl;
+#endif
+             return 1;
+         }
+     }
+
+// ----------------------------------------------------------------------------------------
+
+    char** mitie_total_word_feature_extractor_get_words_in_dictionary (
+        const mitie_total_word_feature_extractor* twfe
+    )
+    {
+        try
+        {
+            std::vector<std::string> words = checked_cast<total_word_feature_extractor>(twfe).get_words_in_dictionary();
+            return std_vector_to_double_ptr(words);
+        }
+        catch (...)
+        {
+            return NULL;
+        }
+    }
